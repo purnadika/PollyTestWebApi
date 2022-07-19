@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using PollyTestWebApi.Model;
+using PollyTestWebApi.Utilities;
 using System;
 using System.Net.Http;
 using System.Text;
@@ -17,10 +18,12 @@ namespace PollyTestWebApi.Api
 
         private readonly ILogger<BaseApi> _logger;
         private readonly HttpClient _httpClient;
+        private readonly PollyPolicy _policies;
 
         protected BaseApi(ILoggerFactory loggerFactory,
-            HttpClient httpClient)
+            HttpClient httpClient, PollyPolicy policies)
         {
+            _policies = policies;
             _logger = loggerFactory.CreateLogger<BaseApi>();
             _httpClient = httpClient;
         }
@@ -35,23 +38,20 @@ namespace PollyTestWebApi.Api
             var url = $"https://httpstat.us/{responsestatus}?sleep={sleep * 1000}";
             try
             {
-                using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                _logger.LogDebug("Start Execute API");
+                _logger.LogDebug($"Current HttpClient.Timeout : {_httpClient.Timeout.TotalSeconds} s");
+                var response = await _policies.GetRetryPolicy().ExecuteAsync(async () => await _httpClient.GetAsync(url));
+                var respMessage = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Start Execute API");
-                    _logger.LogDebug($"Current HttpClient.Timeout : {_httpClient.Timeout.TotalSeconds} s");
-                    var response = await _httpClient.SendAsync(request);
-                    var respMessage = await response.Content.ReadAsStringAsync();
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new Exception();
-                    }
-
-                    return new SingleDataResponseModel<string>
-                    {
-                        Status = response.StatusCode,
-                        Data = respMessage
-                    };
+                    throw new Exception();
                 }
+
+                return new SingleDataResponseModel<string>
+                {
+                    Status = response.StatusCode,
+                    Data = respMessage
+                };
             }
             catch (AggregateException ex)
             {
